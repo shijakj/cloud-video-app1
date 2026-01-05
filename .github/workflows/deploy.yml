@@ -1,0 +1,51 @@
+name: CI/CD - Cloud Video App
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  deploy-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download repo code
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - name: Install backend packages
+        working-directory: backend-node
+        run: npm ci
+
+      - name: Zip backend for Azure
+        run: |
+          cd backend-node
+          zip -r ../backend.zip . -x "node_modules/*"
+
+      - name: Deploy backend to Azure App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: cloud-video-backend-final
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: backend.zip
+
+  deploy-frontend:
+    runs-on: ubuntu-latest
+    needs: deploy-backend
+    steps:
+      - name: Download repo code
+        uses: actions/checkout@v4
+
+      - name: Upload frontend to Azure Storage static website
+        uses: azure/CLI@v2
+        with:
+          inlineScript: |
+            az storage blob upload-batch \
+              --connection-string "${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}" \
+              --destination '$web' \
+              --source "./frontend" \
+              --overwrite true
