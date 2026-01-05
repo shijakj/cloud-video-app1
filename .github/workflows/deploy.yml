@@ -37,15 +37,12 @@ jobs:
     runs-on: ubuntu-latest
     needs: deploy-backend
     steps:
-      - name: Download repo code
-        uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
-      - name: Upload frontend to Azure Storage static website
-        uses: azure/CLI@v2
-        with:
-          inlineScript: |
-            az storage blob upload-batch \
-              --connection-string "${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}" \
-              --destination '$web' \
-              --source "./frontend" \
-              --overwrite true
+    - name: Upload frontend to Azure Storage ($web)
+      uses: bacongobbler/azure-blob-storage-upload@v3.0.0
+      with:
+        source_dir: frontend
+        container_name: $web
+        connection_string: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
+        overwrite: true
