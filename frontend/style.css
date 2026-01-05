@@ -1,0 +1,50 @@
+* { box-sizing: border-box; font-family: system-ui, Arial; }
+body { margin: 0; background: #0b0b0f; color: #fff; }
+
+.topbar {
+  position: sticky; top: 0;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px; background: rgba(10,10,15,0.95);
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.brand { font-weight: 700; letter-spacing: 0.3px; }
+
+.btn {
+  display: inline-block; border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(255,255,255,0.08);
+  color: #fff; padding: 10px 12px; border-radius: 10px;
+  text-decoration: none; cursor: pointer;
+}
+.btn.primary { background: #ffffff; color: #000; }
+.btn.small { padding: 8px 10px; border-radius: 10px; }
+
+.feed { max-width: 520px; margin: 0 auto; padding: 12px; display: grid; gap: 14px; }
+.card {
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 16px; overflow: hidden;
+  background: rgba(255,255,255,0.04);
+}
+.vid { width: 100%; max-height: 560px; background: #000; }
+.meta { padding: 12px; display: grid; gap: 10px; }
+.title { font-size: 18px; font-weight: 700; }
+.desc { opacity: 0.85; }
+
+.row { display: flex; gap: 12px; align-items: center; }
+.views { opacity: 0.8; }
+
+.commentBox { display: grid; gap: 8px; }
+.commentBox input {
+  width: 100%; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(0,0,0,0.35); color: #fff;
+}
+.comments { display: grid; gap: 6px; }
+.cLine { opacity: 0.9; font-size: 14px; }
+.tag {
+  margin-left: 8px; font-size: 12px; padding: 2px 8px;
+  border-radius: 999px; background: rgba(255,255,255,0.10);
+}
+.panel { max-width: 520px; margin: 0 auto; padding: 14px; }
+label { display:block; margin-top: 10px; margin-bottom: 6px; opacity: 0.9; }
+.status { margin-top: 10px; opacity: 0.9; }
+.empty { opacity: 0.85; padding: 30px 10px; text-align: center; }

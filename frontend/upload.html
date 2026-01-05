@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Upload</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <a class="btn" href="index.html">← Back</a>
+    <div class="brand">Upload</div>
+  </header>
+
+  <main class="panel">
+    <form id="uploadForm">
+      <label>Title</label>
+      <input name="title" placeholder="My video title" />
+
+      <label>Description</label>
+      <input name="description" placeholder="Short description" />
+
+      <label>Video (.mp4)</label>
+      <input type="file" name="video" accept="video/*" required />
+
+      <button class="btn primary" type="submit">Upload</button>
+      <div id="status" class="status"></div>
+    </form>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
