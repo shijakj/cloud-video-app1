@@ -3,6 +3,8 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
 
 const { uploadBuffer, downloadStream, ensureContainer } = require("./blobStorage");
 const { initStore, loadData, saveData } = require("./dataStore");
@@ -10,7 +12,32 @@ const { analyzeSentiment } = require("./sentiment");
 
 const app = express();
 
-// ✅ CORS: allow your Azure Static Website + local dev
+/* ===============================
+   Azure / Security Middleware
+================================ */
+
+app.set("trust proxy", 1); // REQUIRED for Azure App Service
+
+app.use(helmet());
+
+// Global rate limit (all routes)
+app.use(
+  rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 300,                // 300 requests / IP
+  })
+);
+
+// Stricter limiter for uploads
+const uploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20, // 20 uploads / 15 min / IP
+});
+
+/* ===============================
+   CORS (Frontend Allowlist)
+================================ */
+
 const allowedOrigins = [
   "https://cloudvideofrontend1.z33.web.core.windows.net",
   "http://127.0.0.1:5500",
@@ -25,20 +52,38 @@ app.use(
       return cb(new Error("CORS blocked: " + origin));
     },
     methods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["Content-Type"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    optionsSuccessStatus: 204,
   })
 );
 
 app.use(express.json({ limit: "2mb" }));
 
-const upload = multer({ storage: multer.memoryStorage() });
+/* ===============================
+   Multer (Upload config)
+================================ */
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
+});
+
+/* ===============================
+   App config
+================================ */
 
 const VIDEO_CONTAINER = process.env.VIDEO_CONTAINER || "videos";
 
-app.get("/", (req, res) => res.json({ message: "Backend API is running" }));
+app.get("/", (req, res) =>
+  res.json({ message: "Backend API is running" })
+);
+
 app.get("/health", (req, res) => res.send("OK"));
 
-// Init store + container
+/* ===============================
+   Init Storage
+================================ */
+
 (async () => {
   try {
     await ensureContainer(VIDEO_CONTAINER);
@@ -49,86 +94,121 @@ app.get("/health", (req, res) => res.send("OK"));
   }
 })();
 
-// Upload video -> Blob + metadata.json
-app.post("/upload", upload.single("video"), async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ error: "No video uploaded" });
+/* ===============================
+   Upload Video
+================================ */
 
-    const title = req.body.title || "Untitled";
-    const description = req.body.description || "";
-    const originalName = (req.file.originalname || "video.mp4").replace(
-      /[^a-zA-Z0-9._-]/g,
-      "_"
-    );
-    const filename = `${Date.now()}_${originalName}`;
+app.post(
+  "/upload",
+  uploadLimiter,
+  upload.single("video"),
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No video uploaded" });
+      }
 
-    await uploadBuffer(VIDEO_CONTAINER, filename, req.file.buffer, req.file.mimetype);
+      const allowedTypes = [
+        "video/mp4",
+        "video/webm",
+        "video/quicktime",
+      ];
 
-    await saveData((data) => {
-      const videos = data.videos || [];
-      const nextId = videos.length ? Math.max(...videos.map((v) => v.id || 0)) + 1 : 1;
+      if (!allowedTypes.includes(req.file.mimetype)) {
+        return res.status(400).json({
+          error: "Only mp4, webm or mov videos are allowed",
+        });
+      }
 
-      videos.push({
-        id: nextId,
+      const title = req.body.title || "Untitled";
+      const description = req.body.description || "";
+
+      const safeName = (req.file.originalname || "video.mp4").replace(
+        /[^a-zA-Z0-9._-]/g,
+        "_"
+      );
+
+      const filename = `${Date.now()}_${safeName}`;
+
+      await uploadBuffer(
+        VIDEO_CONTAINER,
         filename,
-        thumbnail: null,
-        title,
-        description,
-        likes: 0,
-        views: 0,
-        comments: []
+        req.file.buffer,
+        req.file.mimetype
+      );
+
+      await saveData((data) => {
+        const videos = data.videos || [];
+        const nextId = videos.length
+          ? Math.max(...videos.map((v) => v.id || 0)) + 1
+          : 1;
+
+        videos.push({
+          id: nextId,
+          filename,
+          thumbnail: null,
+          title,
+          description,
+          likes: 0,
+          views: 0,
+          comments: [],
+        });
+
+        return { ...data, videos };
       });
 
-      return { ...data, videos };
-    });
-
-    return res.json({ message: "Upload successful", filename });
-  } catch (e) {
-    return res.status(500).json({ error: "Upload failed", details: String(e?.message || e) });
+      return res.json({ message: "Upload successful", filename });
+    } catch (e) {
+      return res.status(500).json({
+        error: "Upload failed",
+        details: String(e?.message || e),
+      });
+    }
   }
-});
+);
+
+/* ===============================
+   API Routes
+================================ */
 
 app.get("/api/videos", async (req, res) => {
   try {
     const { data } = await loadData();
     return res.json(data.videos || []);
-  } catch (e) {
+  } catch {
     return res.status(500).json({ error: "Failed to load videos" });
   }
 });
 
-// Stream video from Blob (frontend uses /video/<filename>)
 app.get("/video/:filename", async (req, res) => {
   try {
-    const filename = req.params.filename;
-    const resp = await downloadStream(VIDEO_CONTAINER, filename);
+    const resp = await downloadStream(
+      VIDEO_CONTAINER,
+      req.params.filename
+    );
 
-    const contentType = resp.contentType || "application/octet-stream";
-    res.setHeader("Content-Type", contentType);
+    res.setHeader(
+      "Content-Type",
+      resp.contentType || "application/octet-stream"
+    );
 
     resp.readableStreamBody.pipe(res);
-  } catch (e) {
+  } catch {
     return res.status(404).send("Not found");
   }
-});
-
-// Optional thumbnail endpoint
-app.get("/thumbnail/:filename", async (req, res) => {
-  return res.status(404).send("No thumbnail");
 });
 
 app.post("/api/like/:id", async (req, res) => {
   try {
     const id = Number(req.params.id);
     await saveData((data) => {
-      const videos = data.videos || [];
-      const v = videos.find((x) => Number(x.id) === id);
-      if (v) v.likes = (v.likes || 0) + 1;
-      return { ...data, videos };
+      const v = data.videos?.find((x) => Number(x.id) === id);
+      if (v) v.likes++;
+      return data;
     });
-    return res.json({ status: "ok" });
+    res.json({ status: "ok" });
   } catch {
-    return res.status(500).json({ error: "Failed" });
+    res.status(500).json({ error: "Failed" });
   }
 });
 
@@ -136,14 +216,13 @@ app.post("/api/view/:id", async (req, res) => {
   try {
     const id = Number(req.params.id);
     await saveData((data) => {
-      const videos = data.videos || [];
-      const v = videos.find((x) => Number(x.id) === id);
-      if (v) v.views = (v.views || 0) + 1;
-      return { ...data, videos };
+      const v = data.videos?.find((x) => Number(x.id) === id);
+      if (v) v.views++;
+      return data;
     });
-    return res.json({ status: "ok" });
+    res.json({ status: "ok" });
   } catch {
-    return res.status(500).json({ error: "Failed" });
+    res.status(500).json({ error: "Failed" });
   }
 });
 
@@ -151,29 +230,38 @@ app.post("/api/comment/:id", async (req, res) => {
   try {
     const id = Number(req.params.id);
     const text = (req.body?.text || "").trim();
-    const username = (req.body?.username || "Anonymous").trim();
+    const user = (req.body?.username || "Anonymous").trim();
 
-    if (!text) return res.status(400).json({ error: "Empty comment" });
+    if (!text) {
+      return res.status(400).json({ error: "Empty comment" });
+    }
 
     const sentiment = await analyzeSentiment(text);
 
     await saveData((data) => {
-      const videos = data.videos || [];
-      const v = videos.find((x) => Number(x.id) === id);
-
+      const v = data.videos?.find((x) => Number(x.id) === id);
       if (v) {
-        v.comments = v.comments || [];
-        v.comments.push({ user: username, text, sentiment, at: new Date().toISOString() });
+        v.comments.push({
+          user,
+          text,
+          sentiment,
+          at: new Date().toISOString(),
+        });
       }
-
-      return { ...data, videos };
+      return data;
     });
 
-    return res.json({ status: "ok", sentiment });
-  } catch (e) {
-    return res.status(500).json({ error: "Failed", details: String(e?.message || e) });
+    res.json({ status: "ok", sentiment });
+  } catch {
+    res.status(500).json({ error: "Failed" });
   }
 });
 
+/* ===============================
+   Start Server
+================================ */
+
 const PORT = process.env.PORT || 8000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () =>
+  console.log(`Server running on port ${PORT}`)
+);
