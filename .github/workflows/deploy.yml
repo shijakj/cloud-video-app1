@@ -26,7 +26,7 @@ jobs:
         with:
           app-name: cloud-video-backend-final
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          package: backend.node
+          package: backend-node
 
   deploy-frontend:
     runs-on: ubuntu-latest
