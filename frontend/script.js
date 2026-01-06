@@ -1,5 +1,6 @@
 // ✅ CHANGE THIS to your backend URL after Azure deploy
-const BACKEND = "http://localhost:8000"; 
+const BACKEND = "https://cloud-video-backend-final-g8g7hhdad8ajcpeu.uksouth-01.azurewebsites.net";
+ 
 // Example later: https://your-backend.azurewebsites.net
 
 async function api(path, opts) {
