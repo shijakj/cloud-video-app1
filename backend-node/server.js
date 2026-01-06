@@ -16,46 +16,51 @@ const app = express();
    Azure / Security Middleware
 ================================ */
 
-app.set("trust proxy", 1); // REQUIRED for Azure App Service
+app.set("trust proxy", 1);
 
-app.use(helmet());
+// ✅ IMPORTANT FIX:
+// Helmet by default can set CORP/COOP/COEP related headers that block
+// cross-origin media loading ("blocked: CORP not same-origin").
+// So we KEEP helmet, but disable crossOriginResourcePolicy.
+app.use(
+  helmet({
+    crossOriginResourcePolicy: false, // ✅ allow media/resources to be loaded cross-origin
+  })
+);
 
 // Global rate limit (all routes)
 app.use(
   rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 300,                // 300 requests / IP
+    windowMs: 15 * 60 * 1000,
+    max: 300,
   })
 );
 
 // Stricter limiter for uploads
 const uploadLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20, // 20 uploads / 15 min / IP
+  max: 20,
 });
 
 /* ===============================
    CORS (Frontend Allowlist)
-   FIX: allow Range header for <video> streaming
 ================================ */
 
 const allowedOrigins = [
   "https://cloudvideofrontend1.z33.web.core.windows.net",
   "http://127.0.0.1:5500",
-  "http://localhost:5500"
+  "http://localhost:5500",
 ];
 
 app.use(
   cors({
     origin: function (origin, cb) {
-      if (!origin) return cb(null, true); // Postman / curl
+      if (!origin) return cb(null, true);
       if (allowedOrigins.includes(origin)) return cb(null, true);
       return cb(new Error("CORS blocked: " + origin));
     },
     methods: ["GET", "POST", "OPTIONS", "HEAD"],
-    // IMPORTANT: video playback needs Range
     allowedHeaders: ["Content-Type", "Authorization", "Range"],
-    // Let browser read these headers
     exposedHeaders: ["Content-Length", "Content-Range", "Accept-Ranges", "Content-Type"],
     optionsSuccessStatus: 204,
     maxAge: 86400,
@@ -79,10 +84,7 @@ const upload = multer({
 
 const VIDEO_CONTAINER = process.env.VIDEO_CONTAINER || "videos";
 
-app.get("/", (req, res) =>
-  res.json({ message: "Backend API is running" })
-);
-
+app.get("/", (req, res) => res.json({ message: "Backend API is running" }));
 app.get("/health", (req, res) => res.send("OK"));
 
 /* ===============================
@@ -103,74 +105,46 @@ app.get("/health", (req, res) => res.send("OK"));
    Upload Video
 ================================ */
 
-app.post(
-  "/upload",
-  uploadLimiter,
-  upload.single("video"),
-  async (req, res) => {
-    try {
-      if (!req.file) {
-        return res.status(400).json({ error: "No video uploaded" });
-      }
+app.post("/upload", uploadLimiter, upload.single("video"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "No video uploaded" });
 
-      const allowedTypes = [
-        "video/mp4",
-        "video/webm",
-        "video/quicktime",
-      ];
-
-      if (!allowedTypes.includes(req.file.mimetype)) {
-        return res.status(400).json({
-          error: "Only mp4, webm or mov videos are allowed",
-        });
-      }
-
-      const title = req.body.title || "Untitled";
-      const description = req.body.description || "";
-
-      const safeName = (req.file.originalname || "video.mp4").replace(
-        /[^a-zA-Z0-9._-]/g,
-        "_"
-      );
-
-      const filename = `${Date.now()}_${safeName}`;
-
-      await uploadBuffer(
-        VIDEO_CONTAINER,
-        filename,
-        req.file.buffer,
-        req.file.mimetype
-      );
-
-      await saveData((data) => {
-        const videos = data.videos || [];
-        const nextId = videos.length
-          ? Math.max(...videos.map((v) => v.id || 0)) + 1
-          : 1;
-
-        videos.push({
-          id: nextId,
-          filename,
-          thumbnail: null,
-          title,
-          description,
-          likes: 0,
-          views: 0,
-          comments: [],
-        });
-
-        return { ...data, videos };
-      });
-
-      return res.json({ message: "Upload successful", filename });
-    } catch (e) {
-      return res.status(500).json({
-        error: "Upload failed",
-        details: String(e?.message || e),
-      });
+    const allowedTypes = ["video/mp4", "video/webm", "video/quicktime"];
+    if (!allowedTypes.includes(req.file.mimetype)) {
+      return res.status(400).json({ error: "Only mp4, webm or mov videos are allowed" });
     }
+
+    const title = req.body.title || "Untitled";
+    const description = req.body.description || "";
+
+    const safeName = (req.file.originalname || "video.mp4").replace(/[^a-zA-Z0-9._-]/g, "_");
+    const filename = `${Date.now()}_${safeName}`;
+
+    await uploadBuffer(VIDEO_CONTAINER, filename, req.file.buffer, req.file.mimetype);
+
+    await saveData((data) => {
+      const videos = data.videos || [];
+      const nextId = videos.length ? Math.max(...videos.map((v) => v.id || 0)) + 1 : 1;
+
+      videos.push({
+        id: nextId,
+        filename,
+        thumbnail: null,
+        title,
+        description,
+        likes: 0,
+        views: 0,
+        comments: [],
+      });
+
+      return { ...data, videos };
+    });
+
+    return res.json({ message: "Upload successful", filename });
+  } catch (e) {
+    return res.status(500).json({ error: "Upload failed", details: String(e?.message || e) });
   }
-);
+});
 
 /* ===============================
    API Routes
@@ -185,21 +159,16 @@ app.get("/api/videos", async (req, res) => {
   }
 });
 
-// FIX: add Accept-Ranges so browser can stream
+// ✅ Video streaming endpoint
 app.get("/video/:filename", async (req, res) => {
   try {
-    const resp = await downloadStream(
-      VIDEO_CONTAINER,
-      req.params.filename
-    );
+    const resp = await downloadStream(VIDEO_CONTAINER, req.params.filename);
 
-    res.setHeader(
-      "Content-Type",
-      resp.contentType || "application/octet-stream"
-    );
-
-    // Important for HTML5 video seeking/streaming
+    res.setHeader("Content-Type", resp.contentType || "application/octet-stream");
     res.setHeader("Accept-Ranges", "bytes");
+
+    // Optional: allow embedding/usage from your frontend origin (extra safe)
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
 
     resp.readableStreamBody.pipe(res);
   } catch {
@@ -212,7 +181,7 @@ app.post("/api/like/:id", async (req, res) => {
     const id = Number(req.params.id);
     await saveData((data) => {
       const v = data.videos?.find((x) => Number(x.id) === id);
-      if (v) v.likes++;
+      if (v) v.likes = (v.likes || 0) + 1;
       return data;
     });
     res.json({ status: "ok" });
@@ -226,7 +195,7 @@ app.post("/api/view/:id", async (req, res) => {
     const id = Number(req.params.id);
     await saveData((data) => {
       const v = data.videos?.find((x) => Number(x.id) === id);
-      if (v) v.views++;
+      if (v) v.views = (v.views || 0) + 1;
       return data;
     });
     res.json({ status: "ok" });
@@ -241,21 +210,15 @@ app.post("/api/comment/:id", async (req, res) => {
     const text = (req.body?.text || "").trim();
     const user = (req.body?.username || "Anonymous").trim();
 
-    if (!text) {
-      return res.status(400).json({ error: "Empty comment" });
-    }
+    if (!text) return res.status(400).json({ error: "Empty comment" });
 
     const sentiment = await analyzeSentiment(text);
 
     await saveData((data) => {
       const v = data.videos?.find((x) => Number(x.id) === id);
       if (v) {
-        v.comments.push({
-          user,
-          text,
-          sentiment,
-          at: new Date().toISOString(),
-        });
+        v.comments = v.comments || [];
+        v.comments.push({ user, text, sentiment, at: new Date().toISOString() });
       }
       return data;
     });
@@ -271,6 +234,4 @@ app.post("/api/comment/:id", async (req, res) => {
 ================================ */
 
 const PORT = process.env.PORT || 8000;
-app.listen(PORT, () =>
-  console.log(`Server running on port ${PORT}`)
-);
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
