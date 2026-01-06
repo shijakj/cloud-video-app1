@@ -36,6 +36,7 @@ const uploadLimiter = rateLimit({
 
 /* ===============================
    CORS (Frontend Allowlist)
+   FIX: allow Range header for <video> streaming
 ================================ */
 
 const allowedOrigins = [
@@ -51,9 +52,13 @@ app.use(
       if (allowedOrigins.includes(origin)) return cb(null, true);
       return cb(new Error("CORS blocked: " + origin));
     },
-    methods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    methods: ["GET", "POST", "OPTIONS", "HEAD"],
+    // IMPORTANT: video playback needs Range
+    allowedHeaders: ["Content-Type", "Authorization", "Range"],
+    // Let browser read these headers
+    exposedHeaders: ["Content-Length", "Content-Range", "Accept-Ranges", "Content-Type"],
     optionsSuccessStatus: 204,
+    maxAge: 86400,
   })
 );
 
@@ -180,6 +185,7 @@ app.get("/api/videos", async (req, res) => {
   }
 });
 
+// FIX: add Accept-Ranges so browser can stream
 app.get("/video/:filename", async (req, res) => {
   try {
     const resp = await downloadStream(
@@ -191,6 +197,9 @@ app.get("/video/:filename", async (req, res) => {
       "Content-Type",
       resp.contentType || "application/octet-stream"
     );
+
+    // Important for HTML5 video seeking/streaming
+    res.setHeader("Accept-Ranges", "bytes");
 
     resp.readableStreamBody.pipe(res);
   } catch {
