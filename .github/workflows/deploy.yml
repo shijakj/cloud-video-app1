@@ -21,17 +21,12 @@ jobs:
         working-directory: backend-node
         run: npm ci
 
-      - name: Zip backend for Azure
-        run: |
-          cd backend-node
-          zip -r ../backend.zip . -x "node_modules/*"
-
       - name: Deploy backend to Azure App Service
         uses: azure/webapps-deploy@v3
         with:
           app-name: cloud-video-backend-final
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          package: backend.zip
+          package: backend.node
 
   deploy-frontend:
     runs-on: ubuntu-latest
