@@ -9,10 +9,10 @@ jobs:
   deploy-backend:
     runs-on: ubuntu-latest
     steps:
-      - name: Download repo code
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Install Node
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -21,23 +21,33 @@ jobs:
         working-directory: backend-node
         run: npm ci
 
+      - name: Run automated backend tests
+        working-directory: backend-node
+        run: npm test
+
+      - name: Zip backend for Azure deploy
+        run: |
+          cd backend-node
+          zip -r ../backend.zip . -x "node_modules/*"
+
       - name: Deploy backend to Azure App Service
         uses: azure/webapps-deploy@v3
         with:
           app-name: cloud-video-backend-final
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          package: backend-node
+          package: backend.zip
 
   deploy-frontend:
     runs-on: ubuntu-latest
     needs: deploy-backend
     steps:
-    - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-    - name: Upload frontend to Azure Storage ($web)
-      uses: bacongobbler/azure-blob-storage-upload@v3.0.0
-      with:
-        source_dir: frontend
-        container_name: $web
-        connection_string: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
-        overwrite: true
+      - name: Upload frontend to Azure Storage ($web)
+        uses: bacongobbler/azure-blob-storage-upload@v3.0.0
+        with:
+          source_dir: frontend
+          container_name: $web
+          connection_string: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
+          overwrite: true
